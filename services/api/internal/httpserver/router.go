@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nexus/api/internal/identity"
+	githubintegration "github.com/nexus/api/internal/integrations/github"
 	"github.com/nexus/api/internal/tenancy"
 )
 
@@ -17,6 +18,8 @@ type Server struct {
 	logger         *slog.Logger
 	identity       *identity.Repository
 	tenancy        *tenancy.Repository
+	githubClient   *githubintegration.Client
+	githubStore    *githubintegration.RepositoryStore
 	allowedOrigins string
 	sessionTTL     time.Duration
 }
@@ -49,11 +52,20 @@ type authResponse struct {
 	WorkspaceSet tenancy.WorkspaceSummary `json:"workspaceSet"`
 }
 
-func NewRouter(logger *slog.Logger, identityRepository *identity.Repository, tenancyRepository *tenancy.Repository, allowedOrigins string, sessionTTL time.Duration) http.Handler {
+type ingestGitHubRepositoryRequest struct {
+	WorkspaceID string `json:"workspaceId"`
+	Owner       string `json:"owner"`
+	Repository  string `json:"repository"`
+	Token       string `json:"token"`
+}
+
+func NewRouter(logger *slog.Logger, identityRepository *identity.Repository, tenancyRepository *tenancy.Repository, githubClient *githubintegration.Client, githubStore *githubintegration.RepositoryStore, allowedOrigins string, sessionTTL time.Duration) http.Handler {
 	server := &Server{
 		logger:         logger,
 		identity:       identityRepository,
 		tenancy:        tenancyRepository,
+		githubClient:   githubClient,
+		githubStore:    githubStore,
 		allowedOrigins: allowedOrigins,
 		sessionTTL:     sessionTTL,
 	}
@@ -64,6 +76,8 @@ func NewRouter(logger *slog.Logger, identityRepository *identity.Repository, ten
 	mux.HandleFunc("POST /v1/auth/login", server.loginHandler)
 	mux.HandleFunc("GET /v1/me", server.meHandler)
 	mux.HandleFunc("GET /v1/workspaces", server.workspacesHandler)
+	mux.HandleFunc("POST /v1/integrations/github/repositories", server.ingestGitHubRepositoryHandler)
+	mux.HandleFunc("GET /v1/integrations/github/repositories", server.githubRepositoriesHandler)
 
 	return server.cors(server.requestLogger(mux))
 }
@@ -163,6 +177,83 @@ func (server *Server) workspacesHandler(response http.ResponseWriter, request *h
 	}
 
 	writeJSON(response, http.StatusOK, map[string][]tenancy.WorkspaceSummary{"items": workspaceSets})
+}
+
+func (server *Server) ingestGitHubRepositoryHandler(response http.ResponseWriter, request *http.Request) {
+	user, ok := server.requireUser(response, request)
+	if !ok {
+		return
+	}
+
+	var payload ingestGitHubRepositoryRequest
+	if !decodeJSON(response, request, &payload) {
+		return
+	}
+
+	if strings.TrimSpace(payload.WorkspaceID) == "" || strings.TrimSpace(payload.Owner) == "" || strings.TrimSpace(payload.Repository) == "" || strings.TrimSpace(payload.Token) == "" {
+		writeError(response, http.StatusBadRequest, "workspaceId, owner, repository, and token are required")
+		return
+	}
+
+	allowed, err := server.tenancy.UserCanAccessWorkspace(request.Context(), user.ID, payload.WorkspaceID)
+	if err != nil {
+		server.logger.Error("workspace access check failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "workspace access check failed")
+		return
+	}
+	if !allowed {
+		writeError(response, http.StatusForbidden, "workspace access denied")
+		return
+	}
+
+	fetchedRepository, err := server.githubClient.FetchRepository(request.Context(), payload.Token, payload.Owner, payload.Repository)
+	if err != nil {
+		server.logger.Warn("github repository fetch failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusBadGateway, "github repository could not be fetched")
+		return
+	}
+
+	savedRepository, err := server.githubStore.UpsertRepository(request.Context(), payload.WorkspaceID, fetchedRepository)
+	if err != nil {
+		server.logger.Error("github repository save failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "github repository could not be saved")
+		return
+	}
+
+	writeJSON(response, http.StatusCreated, map[string]githubintegration.Repository{"repository": savedRepository})
+}
+
+func (server *Server) githubRepositoriesHandler(response http.ResponseWriter, request *http.Request) {
+	user, ok := server.requireUser(response, request)
+	if !ok {
+		return
+	}
+
+	workspaceID := strings.TrimSpace(request.URL.Query().Get("workspaceId"))
+	if workspaceID == "" {
+		writeError(response, http.StatusBadRequest, "workspaceId is required")
+		return
+	}
+
+	allowed, err := server.tenancy.UserCanAccessWorkspace(request.Context(), user.ID, workspaceID)
+	if err != nil {
+		server.logger.Error("workspace access check failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "workspace access check failed")
+		return
+	}
+	if !allowed {
+		writeError(response, http.StatusForbidden, "workspace access denied")
+		return
+	}
+
+	repositories, err := server.githubStore.ListRepositories(request.Context(), workspaceID)
+	if err != nil {
+		server.logger.Error("github repository list failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "github repositories could not be listed")
+		return
+	}
+
+	writeJSON(response, http.StatusOK, map[string][]githubintegration.Repository{"items": repositories})
 }
 
 func (server *Server) requireUser(response http.ResponseWriter, request *http.Request) (identity.User, bool) {

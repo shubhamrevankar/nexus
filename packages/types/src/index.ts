@@ -43,3 +43,22 @@ export interface AuthResponse {
   session: AuthSession;
   workspaceSet: WorkspaceSummary;
 }
+
+export interface GitHubRepository {
+  id: string;
+  workspaceId: string;
+  githubId: number;
+  owner: string;
+  name: string;
+  fullName: string;
+  description: string;
+  htmlUrl: string;
+  defaultBranch: string;
+  language: string;
+  private: boolean;
+  stars: number;
+  forks: number;
+  openIssues: number;
+  pushedAt?: string | null;
+  syncedAt: string;
+}

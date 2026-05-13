@@ -3,6 +3,7 @@
 import type { AuthResponse, WorkspaceSummary } from "@nexus/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { GitHubIntegrationPanel } from "@/components/github-integration-panel";
 import { listWorkspaces } from "@/lib/api";
 import { clearSession, readSession } from "@/lib/session";
 
@@ -33,6 +34,8 @@ export function WorkspaceDashboard() {
   if (!session) {
     return <main className="min-h-screen px-6 py-12 text-zinc-300">Loading workspace...</main>;
   }
+
+  const activeWorkspaceId = workspaceSets[0]?.workspaces[0]?.id ?? session.workspaceSet.workspaces[0]?.id ?? null;
 
   return (
     <main className="min-h-screen px-6 py-10 text-white">
@@ -76,18 +79,9 @@ export function WorkspaceDashboard() {
             </div>
           </section>
 
-          <aside className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-            <h2 className="text-xl font-semibold">Next platform modules</h2>
-            <ul className="mt-5 space-y-3 text-sm text-zinc-300">
-              <li>Connect GitHub as the first integration.</li>
-              <li>Index repositories, commits, and pull requests.</li>
-              <li>Add semantic search and AI citations.</li>
-              <li>Introduce approval-gated automations.</li>
-            </ul>
-          </aside>
+          <GitHubIntegrationPanel token={session.session.token} workspaceId={activeWorkspaceId} />
         </div>
       </section>
     </main>
   );
 }
-

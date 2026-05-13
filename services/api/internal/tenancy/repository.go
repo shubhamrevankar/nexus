@@ -84,6 +84,18 @@ ORDER BY organizations.created_at ASC`, userID)
 	return summaries, rows.Err()
 }
 
+func (repository *Repository) UserCanAccessWorkspace(ctx context.Context, userID string, workspaceID string) (bool, error) {
+	var exists bool
+	err := repository.db.QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM workspaces
+  JOIN organization_memberships ON organization_memberships.organization_id = workspaces.organization_id
+  WHERE workspaces.id = $1 AND organization_memberships.user_id = $2
+)`, workspaceID, userID).Scan(&exists)
+	return exists, err
+}
+
 func (repository *Repository) listWorkspaces(ctx context.Context, organizationID string) ([]Workspace, error) {
 	rows, err := repository.db.QueryContext(ctx, `
 SELECT id::text, organization_id::text, name, slug, created_at

@@ -8,6 +8,7 @@ type Config struct {
 	DatabaseURL     string
 	MigrationsDir   string
 	AllowedOrigins  string
+	GitHubAPIURL    string
 	SessionTTLHours int
 }
 
@@ -18,6 +19,7 @@ func Load() Config {
 		DatabaseURL:     envOrDefault("DATABASE_URL", "postgres://nexus:nexus_dev_password@localhost:5432/nexus?sslmode=disable"),
 		MigrationsDir:   envOrDefault("API_MIGRATIONS_DIR", "migrations"),
 		AllowedOrigins:  envOrDefault("API_ALLOWED_ORIGINS", "http://localhost:3000"),
+		GitHubAPIURL:    envOrDefault("GITHUB_API_URL", "https://api.github.com"),
 		SessionTTLHours: 24 * 7,
 	}
 }

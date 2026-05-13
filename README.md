@@ -75,3 +75,5 @@ See `docs/engineering-standards.md`, `architecture/overview.md`, `adr/0001-modul
 For a complete explanation of what Nexus is building and how the pieces fit together, see `architecture/system-design.md`.
 
 The first product slice is documented in `docs/auth-workspace-slice.md`.
+
+The first integration slice is documented in `docs/github-integration-slice.md`.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/nexus/api/internal/httpserver"
 	"github.com/nexus/api/internal/identity"
+	githubintegration "github.com/nexus/api/internal/integrations/github"
 	"github.com/nexus/api/internal/platform/config"
 	"github.com/nexus/api/internal/platform/database"
 	"github.com/nexus/api/internal/platform/logging"
@@ -39,10 +40,12 @@ func main() {
 
 	identityRepository := identity.NewRepository(db)
 	tenancyRepository := tenancy.NewRepository(db)
+	githubClient := githubintegration.NewClient(appConfig.GitHubAPIURL)
+	githubStore := githubintegration.NewRepositoryStore(db)
 
 	server := &http.Server{
 		Addr:              ":" + appConfig.Port,
-		Handler:           httpserver.NewRouter(logger, identityRepository, tenancyRepository, appConfig.AllowedOrigins, time.Duration(appConfig.SessionTTLHours)*time.Hour),
+		Handler:           httpserver.NewRouter(logger, identityRepository, tenancyRepository, githubClient, githubStore, appConfig.AllowedOrigins, time.Duration(appConfig.SessionTTLHours)*time.Hour),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

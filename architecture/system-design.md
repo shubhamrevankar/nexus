@@ -334,6 +334,8 @@ Implementation notes for this slice live in `docs/auth-workspace-slice.md`.
 - Store repos, commits, pull requests, and metadata.
 - Add ingestion jobs and sync status.
 
+The first GitHub repository metadata slice is documented in `docs/github-integration-slice.md`.
+
 ### Phase 3: Knowledge Search and RAG
 
 - Convert indexed company data into searchable knowledge.

@@ -1,4 +1,4 @@
-import type { AuthResponse, WorkspaceSummary } from "@nexus/types";
+import type { AuthResponse, GitHubRepository, WorkspaceSummary } from "@nexus/types";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
@@ -13,6 +13,13 @@ export interface RegisterPayload {
 export interface LoginPayload {
   email: string;
   password: string;
+}
+
+export interface IngestGitHubRepositoryPayload {
+  workspaceId: string;
+  owner: string;
+  repository: string;
+  token: string;
 }
 
 export async function register(payload: RegisterPayload): Promise<AuthResponse> {
@@ -39,6 +46,31 @@ export async function listWorkspaces(token: string): Promise<WorkspaceSummary[]>
   return response.items;
 }
 
+export async function listGitHubRepositories(token: string, workspaceId: string): Promise<GitHubRepository[]> {
+  const response = await request<{ items: GitHubRepository[] }>(
+    `/v1/integrations/github/repositories?workspaceId=${encodeURIComponent(workspaceId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  return response.items;
+}
+
+export async function ingestGitHubRepository(token: string, payload: IngestGitHubRepositoryPayload): Promise<GitHubRepository> {
+  const response = await request<{ repository: GitHubRepository }>("/v1/integrations/github/repositories", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return response.repository;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
@@ -55,4 +87,3 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   return (await response.json()) as T;
 }
-
