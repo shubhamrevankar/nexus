@@ -1,0 +1,15 @@
+.git
+.github
+.turbo
+node_modules
+**/node_modules
+**/.next
+**/dist
+**/build
+**/coverage
+**/*.tsbuildinfo
+**/__pycache__
+**/*.pyc
+.env
+.env.*
+!.env.example

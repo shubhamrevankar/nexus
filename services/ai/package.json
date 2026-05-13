@@ -1,0 +1,13 @@
+{
+  "name": "@nexus/ai-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "python -m compileall nexus_ai",
+    "dev": "python -m nexus_ai",
+    "lint": "python -m compileall nexus_ai tests",
+    "test": "python -m unittest discover -s tests",
+    "typecheck": "python -m compileall nexus_ai tests"
+  }
+}
+
