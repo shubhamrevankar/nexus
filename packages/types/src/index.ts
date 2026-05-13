@@ -62,3 +62,22 @@ export interface GitHubRepository {
   pushedAt?: string | null;
   syncedAt: string;
 }
+
+export interface GitHubRepositoryFile {
+  id: string;
+  repositoryId: string;
+  path: string;
+  sha: string;
+  size: number;
+  contentText?: string;
+  indexed: boolean;
+  skippedReason: string;
+  syncedAt: string;
+}
+
+export interface GitHubFileSyncResult {
+  repositoryId: string;
+  indexedCount: number;
+  skippedCount: number;
+  files: GitHubRepositoryFile[];
+}

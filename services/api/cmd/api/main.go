@@ -42,10 +42,11 @@ func main() {
 	tenancyRepository := tenancy.NewRepository(db)
 	githubClient := githubintegration.NewClient(appConfig.GitHubAPIURL)
 	githubStore := githubintegration.NewRepositoryStore(db)
+	githubIndexer := githubintegration.NewIndexer(githubClient, githubStore)
 
 	server := &http.Server{
 		Addr:              ":" + appConfig.Port,
-		Handler:           httpserver.NewRouter(logger, identityRepository, tenancyRepository, githubClient, githubStore, appConfig.AllowedOrigins, time.Duration(appConfig.SessionTTLHours)*time.Hour),
+		Handler:           httpserver.NewRouter(logger, identityRepository, tenancyRepository, githubClient, githubIndexer, githubStore, appConfig.AllowedOrigins, time.Duration(appConfig.SessionTTLHours)*time.Hour),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

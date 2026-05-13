@@ -19,6 +19,7 @@ type Server struct {
 	identity       *identity.Repository
 	tenancy        *tenancy.Repository
 	githubClient   *githubintegration.Client
+	githubIndexer  *githubintegration.Indexer
 	githubStore    *githubintegration.RepositoryStore
 	allowedOrigins string
 	sessionTTL     time.Duration
@@ -59,12 +60,20 @@ type ingestGitHubRepositoryRequest struct {
 	Token       string `json:"token"`
 }
 
-func NewRouter(logger *slog.Logger, identityRepository *identity.Repository, tenancyRepository *tenancy.Repository, githubClient *githubintegration.Client, githubStore *githubintegration.RepositoryStore, allowedOrigins string, sessionTTL time.Duration) http.Handler {
+type syncGitHubFilesRequest struct {
+	WorkspaceID  string `json:"workspaceId"`
+	RepositoryID string `json:"repositoryId"`
+	Token        string `json:"token"`
+	MaxFiles     int    `json:"maxFiles"`
+}
+
+func NewRouter(logger *slog.Logger, identityRepository *identity.Repository, tenancyRepository *tenancy.Repository, githubClient *githubintegration.Client, githubIndexer *githubintegration.Indexer, githubStore *githubintegration.RepositoryStore, allowedOrigins string, sessionTTL time.Duration) http.Handler {
 	server := &Server{
 		logger:         logger,
 		identity:       identityRepository,
 		tenancy:        tenancyRepository,
 		githubClient:   githubClient,
+		githubIndexer:  githubIndexer,
 		githubStore:    githubStore,
 		allowedOrigins: allowedOrigins,
 		sessionTTL:     sessionTTL,
@@ -78,6 +87,8 @@ func NewRouter(logger *slog.Logger, identityRepository *identity.Repository, ten
 	mux.HandleFunc("GET /v1/workspaces", server.workspacesHandler)
 	mux.HandleFunc("POST /v1/integrations/github/repositories", server.ingestGitHubRepositoryHandler)
 	mux.HandleFunc("GET /v1/integrations/github/repositories", server.githubRepositoriesHandler)
+	mux.HandleFunc("POST /v1/integrations/github/files/sync", server.syncGitHubFilesHandler)
+	mux.HandleFunc("GET /v1/integrations/github/files", server.githubFilesHandler)
 
 	return server.cors(server.requestLogger(mux))
 }
@@ -254,6 +265,91 @@ func (server *Server) githubRepositoriesHandler(response http.ResponseWriter, re
 	}
 
 	writeJSON(response, http.StatusOK, map[string][]githubintegration.Repository{"items": repositories})
+}
+
+func (server *Server) syncGitHubFilesHandler(response http.ResponseWriter, request *http.Request) {
+	user, ok := server.requireUser(response, request)
+	if !ok {
+		return
+	}
+
+	var payload syncGitHubFilesRequest
+	if !decodeJSON(response, request, &payload) {
+		return
+	}
+
+	if strings.TrimSpace(payload.WorkspaceID) == "" || strings.TrimSpace(payload.RepositoryID) == "" || strings.TrimSpace(payload.Token) == "" {
+		writeError(response, http.StatusBadRequest, "workspaceId, repositoryId, and token are required")
+		return
+	}
+
+	repository, allowed := server.requireRepositoryAccess(response, request, user.ID, payload.WorkspaceID, payload.RepositoryID)
+	if !allowed {
+		return
+	}
+
+	result, err := server.githubIndexer.SyncRepositoryFiles(request.Context(), payload.Token, repository, payload.MaxFiles)
+	if err != nil {
+		server.logger.Warn("github file sync failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusBadGateway, "github files could not be synced")
+		return
+	}
+
+	writeJSON(response, http.StatusCreated, map[string]githubintegration.FileSyncResult{"result": result})
+}
+
+func (server *Server) githubFilesHandler(response http.ResponseWriter, request *http.Request) {
+	user, ok := server.requireUser(response, request)
+	if !ok {
+		return
+	}
+
+	workspaceID := strings.TrimSpace(request.URL.Query().Get("workspaceId"))
+	repositoryID := strings.TrimSpace(request.URL.Query().Get("repositoryId"))
+	if workspaceID == "" || repositoryID == "" {
+		writeError(response, http.StatusBadRequest, "workspaceId and repositoryId are required")
+		return
+	}
+
+	repository, allowed := server.requireRepositoryAccess(response, request, user.ID, workspaceID, repositoryID)
+	if !allowed {
+		return
+	}
+
+	files, err := server.githubStore.ListFiles(request.Context(), repository.ID, true, 100)
+	if err != nil {
+		server.logger.Error("github file list failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "github files could not be listed")
+		return
+	}
+
+	writeJSON(response, http.StatusOK, map[string][]githubintegration.RepositoryFile{"items": files})
+}
+
+func (server *Server) requireRepositoryAccess(response http.ResponseWriter, request *http.Request, userID string, workspaceID string, repositoryID string) (githubintegration.Repository, bool) {
+	allowed, err := server.tenancy.UserCanAccessWorkspace(request.Context(), userID, workspaceID)
+	if err != nil {
+		server.logger.Error("workspace access check failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "workspace access check failed")
+		return githubintegration.Repository{}, false
+	}
+	if !allowed {
+		writeError(response, http.StatusForbidden, "workspace access denied")
+		return githubintegration.Repository{}, false
+	}
+
+	repository, err := server.githubStore.GetRepository(request.Context(), workspaceID, repositoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, "repository not found")
+		return githubintegration.Repository{}, false
+	}
+	if err != nil {
+		server.logger.Error("github repository lookup failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "repository lookup failed")
+		return githubintegration.Repository{}, false
+	}
+
+	return repository, true
 }
 
 func (server *Server) requireUser(response http.ResponseWriter, request *http.Request) (identity.User, bool) {

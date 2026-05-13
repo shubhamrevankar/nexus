@@ -77,3 +77,5 @@ For a complete explanation of what Nexus is building and how the pieces fit toge
 The first product slice is documented in `docs/auth-workspace-slice.md`.
 
 The first integration slice is documented in `docs/github-integration-slice.md`.
+
+Repository source-file indexing is documented in `docs/github-file-indexing-slice.md`.

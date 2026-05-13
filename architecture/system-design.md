@@ -336,6 +336,8 @@ Implementation notes for this slice live in `docs/auth-workspace-slice.md`.
 
 The first GitHub repository metadata slice is documented in `docs/github-integration-slice.md`.
 
+The first GitHub source-file indexing slice is documented in `docs/github-file-indexing-slice.md`.
+
 ### Phase 3: Knowledge Search and RAG
 
 - Convert indexed company data into searchable knowledge.

@@ -1,4 +1,4 @@
-import type { AuthResponse, GitHubRepository, WorkspaceSummary } from "@nexus/types";
+import type { AuthResponse, GitHubFileSyncResult, GitHubRepository, GitHubRepositoryFile, WorkspaceSummary } from "@nexus/types";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
@@ -20,6 +20,13 @@ export interface IngestGitHubRepositoryPayload {
   owner: string;
   repository: string;
   token: string;
+}
+
+export interface SyncGitHubFilesPayload {
+  workspaceId: string;
+  repositoryId: string;
+  token: string;
+  maxFiles: number;
 }
 
 export async function register(payload: RegisterPayload): Promise<AuthResponse> {
@@ -69,6 +76,31 @@ export async function ingestGitHubRepository(token: string, payload: IngestGitHu
   });
 
   return response.repository;
+}
+
+export async function syncGitHubFiles(token: string, payload: SyncGitHubFilesPayload): Promise<GitHubFileSyncResult> {
+  const response = await request<{ result: GitHubFileSyncResult }>("/v1/integrations/github/files/sync", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return response.result;
+}
+
+export async function listGitHubFiles(token: string, workspaceId: string, repositoryId: string): Promise<GitHubRepositoryFile[]> {
+  const response = await request<{ items: GitHubRepositoryFile[] }>(
+    `/v1/integrations/github/files?workspaceId=${encodeURIComponent(workspaceId)}&repositoryId=${encodeURIComponent(repositoryId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  return response.items;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

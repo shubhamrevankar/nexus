@@ -11,7 +11,7 @@ import (
 )
 
 func TestHealthHandler(t *testing.T) {
-	server := httptest.NewServer(NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil, nil, nil, "", time.Hour))
+	server := httptest.NewServer(NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil, nil, nil, nil, "", time.Hour))
 	defer server.Close()
 
 	response, err := http.Get(server.URL + "/healthz")
