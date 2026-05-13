@@ -71,3 +71,5 @@ cd services/ai && python -m unittest discover -s tests
 - Treat logs, metrics, tracing, request IDs, and health checks as platform requirements.
 
 See `docs/engineering-standards.md`, `architecture/overview.md`, `adr/0001-modular-monolith.md`, and `rfc/0000-template.md`.
+
+For a complete explanation of what Nexus is building and how the pieces fit together, see `architecture/system-design.md`.

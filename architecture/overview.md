@@ -2,6 +2,8 @@
 
 Nexus begins as a modular monolith inside a monorepo.
 
+For the full system explanation and diagrams, see `architecture/system-design.md`.
+
 ## Current Boundaries
 
 - `apps/web` contains the user-facing workspace shell.
@@ -15,4 +17,3 @@ Nexus begins as a modular monolith inside a monorepo.
 The platform should evolve through vertical slices. Product modules such as authentication, organizations, workspace, integrations, knowledge search, incident management, and workflows should expose explicit contracts and remain independently testable.
 
 Microservices, Kubernetes, Terraform, vector databases, OpenSearch, ClickHouse, and graph databases are future options, not day-one defaults.
-
