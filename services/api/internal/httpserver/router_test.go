@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestHealthHandler(t *testing.T) {
-	server := httptest.NewServer(NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	server := httptest.NewServer(NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil, "", time.Hour))
 	defer server.Close()
 
 	response, err := http.Get(server.URL + "/healthz")
@@ -32,4 +33,3 @@ func TestHealthHandler(t *testing.T) {
 		t.Fatalf("unexpected health response: %+v", payload)
 	}
 }
-

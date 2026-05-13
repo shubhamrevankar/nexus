@@ -1,5 +1,6 @@
 import { getPublicConfig } from "@nexus/config";
 import type { HealthStatus } from "@nexus/types";
+import Link from "next/link";
 
 const status: HealthStatus = {
   service: "web",
@@ -22,6 +23,14 @@ export default function HomePage() {
           Nexus is initialized with a production-grade engineering foundation: monorepo tooling,
           service boundaries, local infrastructure, documentation workflows, and CI-ready checks.
         </p>
+        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          <Link className="rounded-2xl bg-violet-500 px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-violet-400" href="/auth">
+            Create workspace
+          </Link>
+          <Link className="rounded-2xl border border-white/10 px-5 py-3 text-center text-sm font-semibold text-zinc-300 transition hover:text-white" href="/workspace">
+            Open workspace
+          </Link>
+        </div>
         <dl className="mt-10 grid gap-4 text-sm text-zinc-300 sm:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <dt className="text-zinc-500">Workspace</dt>
@@ -40,4 +49,3 @@ export default function HomePage() {
     </main>
   );
 }
-

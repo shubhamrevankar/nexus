@@ -11,21 +11,40 @@ import (
 	"time"
 
 	"github.com/nexus/api/internal/httpserver"
+	"github.com/nexus/api/internal/identity"
+	"github.com/nexus/api/internal/platform/config"
+	"github.com/nexus/api/internal/platform/database"
 	"github.com/nexus/api/internal/platform/logging"
+	"github.com/nexus/api/internal/tenancy"
 )
 
 func main() {
-	logger := logging.New(os.Getenv("API_LOG_LEVEL"))
-	port := envOrDefault("API_PORT", "8080")
-
-	server := &http.Server{
-		Addr:              ":" + port,
-		Handler:           httpserver.NewRouter(logger),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	appConfig := config.Load()
+	logger := logging.New(appConfig.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	db, err := database.Open(ctx, appConfig.DatabaseURL)
+	if err != nil {
+		logger.Error("database connection failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if err := database.Migrate(ctx, db, appConfig.MigrationsDir); err != nil {
+		logger.Error("database migration failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	identityRepository := identity.NewRepository(db)
+	tenancyRepository := tenancy.NewRepository(db)
+
+	server := &http.Server{
+		Addr:              ":" + appConfig.Port,
+		Handler:           httpserver.NewRouter(logger, identityRepository, tenancyRepository, appConfig.AllowedOrigins, time.Duration(appConfig.SessionTTLHours)*time.Hour),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 
 	go func() {
 		logger.Info("api server starting", slog.String("addr", server.Addr))
@@ -47,13 +66,3 @@ func main() {
 
 	logger.Info("api server stopped")
 }
-
-func envOrDefault(key string, fallback string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	return value
-}
-

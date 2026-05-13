@@ -31,7 +31,7 @@ scripts/             Developer automation scripts
 
 - Node.js 20+
 - pnpm 9+
-- Go 1.22+
+- Go 1.23+
 - Python 3.12+
 - Docker and Docker Compose
 
@@ -73,3 +73,5 @@ cd services/ai && python -m unittest discover -s tests
 See `docs/engineering-standards.md`, `architecture/overview.md`, `adr/0001-modular-monolith.md`, and `rfc/0000-template.md`.
 
 For a complete explanation of what Nexus is building and how the pieces fit together, see `architecture/system-design.md`.
+
+The first product slice is documented in `docs/auth-workspace-slice.md`.

@@ -326,6 +326,8 @@ The first real product slice.
 - API has real persistence in PostgreSQL.
 - Web app has basic workspace navigation.
 
+Implementation notes for this slice live in `docs/auth-workspace-slice.md`.
+
 ### Phase 2: Integrations and Ingestion
 
 - Connect GitHub first.
@@ -367,4 +369,3 @@ The first real product slice.
 - Use Redis for cache, coordination, and future realtime support.
 - Add vector search only when ingestion and knowledge models exist.
 - Require permissions, audit logs, and approval flows before AI performs external actions.
-

@@ -1,11 +1,25 @@
 package httpserver
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/nexus/api/internal/identity"
+	"github.com/nexus/api/internal/tenancy"
 )
+
+type Server struct {
+	logger         *slog.Logger
+	identity       *identity.Repository
+	tenancy        *tenancy.Repository
+	allowedOrigins string
+	sessionTTL     time.Duration
+}
 
 type healthResponse struct {
 	Service string `json:"service"`
@@ -13,14 +27,48 @@ type healthResponse struct {
 	Time    string `json:"time"`
 }
 
-func NewRouter(logger *slog.Logger) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthHandler)
-
-	return requestLogger(logger, mux)
+type errorResponse struct {
+	Error string `json:"error"`
 }
 
-func healthHandler(response http.ResponseWriter, request *http.Request) {
+type registerRequest struct {
+	Email            string `json:"email"`
+	Name             string `json:"name"`
+	Password         string `json:"password"`
+	OrganizationName string `json:"organizationName"`
+	WorkspaceName    string `json:"workspaceName"`
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type authResponse struct {
+	Session      identity.Session         `json:"session"`
+	WorkspaceSet tenancy.WorkspaceSummary `json:"workspaceSet"`
+}
+
+func NewRouter(logger *slog.Logger, identityRepository *identity.Repository, tenancyRepository *tenancy.Repository, allowedOrigins string, sessionTTL time.Duration) http.Handler {
+	server := &Server{
+		logger:         logger,
+		identity:       identityRepository,
+		tenancy:        tenancyRepository,
+		allowedOrigins: allowedOrigins,
+		sessionTTL:     sessionTTL,
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", server.healthHandler)
+	mux.HandleFunc("POST /v1/auth/register", server.registerHandler)
+	mux.HandleFunc("POST /v1/auth/login", server.loginHandler)
+	mux.HandleFunc("GET /v1/me", server.meHandler)
+	mux.HandleFunc("GET /v1/workspaces", server.workspacesHandler)
+
+	return server.cors(server.requestLogger(mux))
+}
+
+func (server *Server) healthHandler(response http.ResponseWriter, request *http.Request) {
 	writeJSON(response, http.StatusOK, healthResponse{
 		Service: "api",
 		Status:  "ok",
@@ -28,17 +76,176 @@ func healthHandler(response http.ResponseWriter, request *http.Request) {
 	})
 }
 
-func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
+func (server *Server) registerHandler(response http.ResponseWriter, request *http.Request) {
+	var payload registerRequest
+	if !decodeJSON(response, request, &payload) {
+		return
+	}
+
+	if strings.TrimSpace(payload.Email) == "" || strings.TrimSpace(payload.Name) == "" || len(payload.Password) < 8 {
+		writeError(response, http.StatusBadRequest, "email, name, and password with at least 8 characters are required")
+		return
+	}
+	if strings.TrimSpace(payload.OrganizationName) == "" || strings.TrimSpace(payload.WorkspaceName) == "" {
+		writeError(response, http.StatusBadRequest, "organizationName and workspaceName are required")
+		return
+	}
+
+	session, err := server.identity.Register(request.Context(), payload.Email, payload.Name, payload.Password, server.sessionTTL)
+	if err != nil {
+		server.logger.Warn("user registration failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusConflict, "user could not be registered")
+		return
+	}
+
+	workspaceSet, err := server.tenancy.CreateOrganizationWithWorkspace(request.Context(), session.User.ID, payload.OrganizationName, payload.WorkspaceName)
+	if err != nil {
+		server.logger.Error("workspace creation failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "workspace could not be created")
+		return
+	}
+
+	writeJSON(response, http.StatusCreated, authResponse{Session: session, WorkspaceSet: workspaceSet})
+}
+
+func (server *Server) loginHandler(response http.ResponseWriter, request *http.Request) {
+	var payload loginRequest
+	if !decodeJSON(response, request, &payload) {
+		return
+	}
+
+	session, err := server.identity.Login(request.Context(), payload.Email, payload.Password, server.sessionTTL)
+	if errors.Is(err, identity.ErrInvalidCredentials) {
+		writeError(response, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	if err != nil {
+		server.logger.Error("login failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "login failed")
+		return
+	}
+
+	workspaceSets, err := server.tenancy.ListForUser(request.Context(), session.User.ID)
+	if err != nil {
+		server.logger.Error("workspace lookup failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "workspace lookup failed")
+		return
+	}
+
+	var firstWorkspaceSet tenancy.WorkspaceSummary
+	if len(workspaceSets) > 0 {
+		firstWorkspaceSet = workspaceSets[0]
+	}
+
+	writeJSON(response, http.StatusOK, authResponse{Session: session, WorkspaceSet: firstWorkspaceSet})
+}
+
+func (server *Server) meHandler(response http.ResponseWriter, request *http.Request) {
+	user, ok := server.requireUser(response, request)
+	if !ok {
+		return
+	}
+
+	writeJSON(response, http.StatusOK, map[string]identity.User{"user": user})
+}
+
+func (server *Server) workspacesHandler(response http.ResponseWriter, request *http.Request) {
+	user, ok := server.requireUser(response, request)
+	if !ok {
+		return
+	}
+
+	workspaceSets, err := server.tenancy.ListForUser(request.Context(), user.ID)
+	if err != nil {
+		server.logger.Error("workspace list failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "workspace list failed")
+		return
+	}
+
+	writeJSON(response, http.StatusOK, map[string][]tenancy.WorkspaceSummary{"items": workspaceSets})
+}
+
+func (server *Server) requireUser(response http.ResponseWriter, request *http.Request) (identity.User, bool) {
+	token := bearerToken(request.Header.Get("Authorization"))
+	if token == "" {
+		writeError(response, http.StatusUnauthorized, "missing bearer token")
+		return identity.User{}, false
+	}
+
+	user, err := server.identity.UserByToken(request.Context(), token)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusUnauthorized, "invalid bearer token")
+		return identity.User{}, false
+	}
+	if err != nil {
+		server.logger.Error("session lookup failed", slog.String("error", err.Error()))
+		writeError(response, http.StatusInternalServerError, "session lookup failed")
+		return identity.User{}, false
+	}
+
+	return user, true
+}
+
+func bearerToken(value string) string {
+	parts := strings.SplitN(value, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+
+	return strings.TrimSpace(parts[1])
+}
+
+func (server *Server) requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		started := time.Now()
 		next.ServeHTTP(response, request)
-		logger.Info(
+		server.logger.Info(
 			"http request handled",
 			slog.String("method", request.Method),
 			slog.String("path", request.URL.Path),
 			slog.Duration("duration", time.Since(started)),
 		)
 	})
+}
+
+func (server *Server) cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		origin := request.Header.Get("Origin")
+		if origin != "" && server.originAllowed(origin) {
+			response.Header().Set("Access-Control-Allow-Origin", origin)
+			response.Header().Set("Vary", "Origin")
+		}
+
+		response.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		response.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
+		if request.Method == http.MethodOptions {
+			response.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(response, request)
+	})
+}
+
+func (server *Server) originAllowed(origin string) bool {
+	for _, allowed := range strings.Split(server.allowedOrigins, ",") {
+		if strings.TrimSpace(allowed) == origin {
+			return true
+		}
+	}
+
+	return false
+}
+
+func decodeJSON(response http.ResponseWriter, request *http.Request, target any) bool {
+	defer request.Body.Close()
+	if err := json.NewDecoder(request.Body).Decode(target); err != nil {
+		writeError(response, http.StatusBadRequest, "invalid json body")
+		return false
+	}
+
+	return true
 }
 
 func writeJSON(response http.ResponseWriter, status int, body any) {
@@ -50,3 +257,6 @@ func writeJSON(response http.ResponseWriter, status int, body any) {
 	}
 }
 
+func writeError(response http.ResponseWriter, status int, message string) {
+	writeJSON(response, status, errorResponse{Error: message})
+}
